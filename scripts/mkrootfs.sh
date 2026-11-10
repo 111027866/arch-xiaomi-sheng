@@ -15,12 +15,13 @@ usage() {
 用法: mkrootfs.sh [选项]
 
 选项:
-  --desktop none|kde|gnome
+  --desktop none|kde|gnome|denial
   --extra "PKG ..."
   --hostname NAME
   --user NAME
   --password PASSWORD
   --size MIB
+  --fs ext4|btrfs
   --partlabel LABEL
   --cmdline "KERNEL COMMAND LINE"
   -h, --help
@@ -57,6 +58,11 @@ while (($# > 0)); do
     --size)
       require_option_value "$1" "${2:-}"
       ROOTFS_SIZE_MB="$2"
+      shift 2
+      ;;
+    --fs)
+      require_option_value "$1" "${2:-}"
+      ROOTFS_FS="$2"
       shift 2
       ;;
     --partlabel)
@@ -98,12 +104,70 @@ desktop_packages() {
     gnome)
       printf '%s\n' gnome gnome-tweaks gdm networkmanager
       ;;
+    denial)
+      # Denial 自带 wayland-session 入口；SDDM 负责登录与自动登录。
+      printf '%s\n' denial sddm networkmanager
+      ;;
     none)
       ;;
     *)
-      die "不支持的桌面: $ROOTFS_DESKTOP（可选 none、kde、gnome）"
+      die "不支持的桌面: $ROOTFS_DESKTOP（可选 none、kde、gnome、denial）"
       ;;
   esac
+}
+
+denial_enabled() {
+  [[ "$ROOTFS_DESKTOP" == denial ]]
+}
+
+configure_denial_repository() {
+  local key_file="$MOUNT_DIR/tmp/denial-repo-key.asc"
+  local fingerprint
+
+  [[ -f "$MOUNT_DIR/etc/pacman.d/gnupg/trustdb.gpg" || \
+     -f "$MOUNT_DIR/etc/pacman.d/gnupg/pubring.kbx" ]] || \
+    die "pacman keyring 未初始化，无法信任 Denial 仓库密钥"
+
+  msg "配置 Denial 软件源: $ROOTFS_DENIAL_REPO"
+  sudo install -d -m 0755 "$MOUNT_DIR/tmp"
+  sudo curl -fsSL --retry 3 --connect-timeout 20 \
+    -o "$key_file" "$ROOTFS_DENIAL_KEY_URL"
+
+  # pacman-key 依赖完整的 GnuPG 环境，base 组不保证包含 gnupg。
+  sudo arch-chroot "$MOUNT_DIR" pacman -S --needed --noconfirm gnupg
+
+  fingerprint="$(sudo arch-chroot "$MOUNT_DIR" gpg --batch --with-colons \
+    --show-keys /tmp/denial-repo-key.asc |
+    awk -F: '$1 == "fpr" { print toupper($10); exit }')"
+  [[ "$fingerprint" == "$ROOTFS_DENIAL_KEY_FINGERPRINT" ]] || \
+    die "Denial 仓库密钥指纹不匹配: ${fingerprint:-<空>}"
+
+  sudo arch-chroot "$MOUNT_DIR" pacman-key --add /tmp/denial-repo-key.asc
+  sudo arch-chroot "$MOUNT_DIR" \
+    pacman-key --lsign-key "$ROOTFS_DENIAL_KEY_FINGERPRINT"
+  sudo rm -f "$key_file"
+
+  printf '\n[denial]\nSigLevel = Required TrustedOnly\nServer = %s\n' \
+    "$ROOTFS_DENIAL_REPO" | sudo tee -a "$MOUNT_DIR/etc/pacman.conf" >/dev/null
+}
+
+configure_denial_session() {
+  msg "配置 Denial 会话（shell profile: $ROOTFS_DENIAL_PROFILE）"
+  printf '\n# Added by arch-xiaomi-sheng: 平板默认使用 mobile shell。\nDENIAL_SHELL_PROFILE=%s\n' \
+    "$ROOTFS_DENIAL_PROFILE" |
+    sudo tee -a "$MOUNT_DIR/etc/denial/session.conf" >/dev/null
+
+  # SDDM 已认证用户，因此会话按解锁状态启动；若改用 getty/greetd 自动登录，
+  # 必须改为 denial-session --start-locked。
+  if [[ -n "$ROOTFS_USER" ]]; then
+    sudo install -d -m 0755 "$MOUNT_DIR/etc/sddm.conf.d"
+    cat <<EOF | sudo tee "$MOUNT_DIR/etc/sddm.conf.d/10-autologin.conf" >/dev/null
+[Autologin]
+User=$ROOTFS_USER
+Session=denial
+Relogin=false
+EOF
+  fi
 }
 
 validate_options() {
@@ -112,6 +176,14 @@ validate_options() {
   [[ "$ROOTFS_HOSTNAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]] || die "主机名格式无效"
   [[ -z "$ROOTFS_USER" || "$ROOTFS_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "用户名格式无效"
   [[ "$ROOTFS_PARTLABEL" =~ ^[a-zA-Z0-9._-]+$ ]] || die "分区标签格式无效"
+  [[ "$ROOTFS_FS" == ext4 || "$ROOTFS_FS" == btrfs ]] || \
+    die "ROOTFS_FS 只能是 ext4 或 btrfs"
+  if denial_enabled; then
+    [[ "$ROOTFS_DENIAL_PROFILE" == mobile || "$ROOTFS_DENIAL_PROFILE" == desktop ]] || \
+      die "ROOTFS_DENIAL_PROFILE 只能是 mobile 或 desktop"
+    [[ "$ROOTFS_DENIAL_KEY_FINGERPRINT" =~ ^([0-9A-F]{40})$ ]] || \
+      die "ROOTFS_DENIAL_KEY_FINGERPRINT 必须是 40 位大写十六进制指纹"
+  fi
   desktop_packages >/dev/null
 }
 
@@ -120,10 +192,17 @@ verify_filesystem() {
   local status
 
   set +e
-  e2fsck -fp "$image"
+  case "$ROOTFS_FS" in
+    ext4) e2fsck -fp "$image" ;;
+    btrfs) btrfs check --readonly "$image" ;;
+  esac
   status=$?
   set -e
-  ((status <= 1)) || die "文件系统检查失败，e2fsck 状态码: $status"
+
+  case "$ROOTFS_FS" in
+    ext4) ((status <= 1)) || die "文件系统检查失败，e2fsck 状态码: $status" ;;
+    btrfs) ((status == 0)) || die "文件系统检查失败，btrfs check 状态码: $status" ;;
+  esac
 }
 
 main() {
@@ -144,8 +223,16 @@ main() {
   )
 
   validate_options
-  require_commands arch-chroot awk chpasswd cp e2fsck find install mkfs.ext4 \
-    mount mountpoint pacstrap sed sudo tee truncate umount
+  local -a fs_commands=()
+  case "$ROOTFS_FS" in
+    ext4) fs_commands=(e2fsck mkfs.ext4) ;;
+    btrfs) fs_commands=(btrfs mkfs.btrfs) ;;
+  esac
+  require_commands arch-chroot awk chpasswd cp find install \
+    mount mountpoint pacstrap sed sudo tee truncate umount "${fs_commands[@]}"
+  if denial_enabled; then
+    require_commands curl
+  fi
 
   [[ -d "$OUT_REPO_DIR" ]] || die "本地仓库不存在；请先运行 make repo"
   mapfile -t repository_files < <(
@@ -158,7 +245,11 @@ main() {
   rm -f "$boot_image"
   truncate -s 0 "$rootfs_image"
   truncate -s "${ROOTFS_SIZE_MB}M" "$rootfs_image"
-  mkfs.ext4 -F -L sheng-root "$rootfs_image"
+  msg "创建 $ROOTFS_FS 文件系统"
+  case "$ROOTFS_FS" in
+    ext4) mkfs.ext4 -F -L sheng-root "$rootfs_image" ;;
+    btrfs) mkfs.btrfs -f -L sheng-root "$rootfs_image" ;;
+  esac
 
   MOUNT_DIR="$(mktemp -d)"
   msg "挂载 rootfs: $MOUNT_DIR"
@@ -201,6 +292,12 @@ main() {
   sudo arch-chroot "$MOUNT_DIR" /usr/bin/env MKINITCPIO_POST_HOOKS=/dev/null \
     pacman -Syu --noconfirm -- "${ROOTFS_PACKAGES[@]}"
 
+  if denial_enabled; then
+    configure_denial_repository
+    msg "刷新软件源索引（含 Denial）"
+    sudo arch-chroot "$MOUNT_DIR" pacman -Sy --noconfirm
+  fi
+
   mapfile -t desktop_pkgs < <(desktop_packages)
   if ((${#desktop_pkgs[@]} > 0)); then
     msg "安装桌面环境: $ROOTFS_DESKTOP"
@@ -221,6 +318,15 @@ main() {
 ::1         localhost ip6-localhost ip6-loopback
 EOF
 
+  # btrfs 需要显式挂载选项才能启用压缩；ext4 保持原样（不加 fstab）。
+  if [[ "$ROOTFS_FS" == btrfs ]]; then
+    local fstab_options="rw"
+    [[ -z "$ROOTFS_BTRFS_OPTIONS" ]] || fstab_options="rw,$ROOTFS_BTRFS_OPTIONS"
+    printf 'PARTLABEL=%s / btrfs %s 0 0\n' \
+      "$ROOTFS_PARTLABEL" "$fstab_options" |
+      sudo tee "$MOUNT_DIR/etc/fstab" >/dev/null
+  fi
+
   sudo sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' "$MOUNT_DIR/etc/locale.gen"
   sudo arch-chroot "$MOUNT_DIR" locale-gen
   printf 'LANG=en_US.UTF-8\n' | sudo tee "$MOUNT_DIR/etc/locale.conf" >/dev/null
@@ -238,7 +344,12 @@ EOF
   case "$ROOTFS_DESKTOP" in
     gnome) sudo arch-chroot "$MOUNT_DIR" systemctl enable gdm ;;
     kde) sudo arch-chroot "$MOUNT_DIR" systemctl enable sddm ;;
+    denial) sudo arch-chroot "$MOUNT_DIR" systemctl enable sddm ;;
   esac
+
+  if denial_enabled; then
+    configure_denial_session
+  fi
 
   sudo install -d -m 0755 "$MOUNT_DIR/boot/loader/entries"
   cat <<EOF | sudo tee "$MOUNT_DIR/boot/loader/entries/arch.conf" >/dev/null

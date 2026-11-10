@@ -3,7 +3,7 @@
 面向 **Xiaomi Pad 6S Pro 12.4（SM8550-AB，代号 sheng）** 的 Arch Linux ARM
 硬件支持包集合与镜像构建系统。
 
-仓库把上游源码、Debian 设备包和本地设备文件适配为 16 个标准 PKGBUILD，经过
+仓库把上游源码、Debian 设备包和本地设备文件适配为 19 个标准 PKGBUILD，经过
 clean chroot 构建后生成本地 pacman 仓库，并可进一步组装 `rootfs.img` 与
 Android `boot.img`。
 
@@ -58,6 +58,7 @@ LPASS、SoundWire 与 ASoC 声卡/codec 驱动完成绑定，UCM2 只在 ALSA �
 | `xiaomi-pen-status` | Focus Pen 状态托盘 | [ianchb/xiaomi-pen-status](https://github.com/ianchb/xiaomi-pen-status) |
 | `xiaomi-sheng-fingerprint` | FPC1553 QTEE 指纹支持 | [ianchb/xiaomi-sheng-fingerprint](https://github.com/ianchb/xiaomi-sheng-fingerprint) |
 | `xiaomi-sheng-keyboard-helper` | 键盘折叠角与麦克风指示辅助 | [ianchb/xiaomi-sheng-keyboard-helper](https://github.com/ianchb/xiaomi-sheng-keyboard-helper) |
+| `xiaomi-sheng-keyboard-backlight` | 官方磁吸键盘背光控制（手动亮度、跟随屏幕、折叠熄灭） | [slhssb/xiaomi-sheng-keyboard-backlight](https://github.com/slhssb/xiaomi-sheng-keyboard-backlight) |
 | `xiaomi-sheng-thp` | NT36532E 用户态触控处理 | [ianchb/xiaomi-sheng-thp](https://github.com/ianchb/xiaomi-sheng-thp) |
 
 ### HexagonRPC 版本
@@ -98,12 +99,26 @@ make all
 
 ```bash
 make files    # 生成确定性的 files.tar.gz
-make build    # clean chroot 构建 16 个包
+make build    # clean chroot 构建 19 个包
 make repo     # 原子生成 out/repo
 make rootfs   # 生成 rootfs.img 和 boot.img
 ```
 
 直接运行 `make` 只显示帮助，不会意外启动耗时构建。
+
+### 在线构建（GitHub Actions）
+
+`.github/workflows/build.yml` 可以在 GitHub 上直接产出可刷写镜像：Fork 仓库后在
+Actions 里选择 **Build rootfs** → **Run workflow**，填写桌面、文件系统（ext4/btrfs）、
+镜像大小、用户名、主机名和额外包等参数即可。流水线在 arm64 runner 上解包
+Arch Linux ARM 根文件系统、安装 devtools、执行 `make check` 与完整的
+build → repo → rootfs 流程，最后上传：
+
+- `rootfs-<fs>-<desktop>-<size>m.zip` 中的 `rootfs.img.zst`（zstd 压缩，刷写前先解压）；
+- `boot-<fs>-<desktop>-<size>m.zip` 中的 `boot.img` 与 `SHA256SUMS`。
+
+构建密码优先取仓库 secret `ROOTFS_PASSWORD`，未设置时回退到 `password`。默认 runner
+为 `ubuntu-24.04-arm`，也可以把 `runner` 输入改成自建 aarch64 机器。
 
 ### 增量构建
 
@@ -142,14 +157,41 @@ make rootfs ROOTFS_ARGS='--desktop kde --size 8192'
 |---|---|---|
 | `BUILD_CHROOT` | `/var/lib/archbuild` | devtools clean chroot 根目录 |
 | `OUT_DIR` | `<项目>/out` | 所有输出目录 |
-| `ROOTFS_DESKTOP` | `none` | `none`、`kde` 或 `gnome` |
+| `ROOTFS_DESKTOP` | `none` | `none`、`kde`、`gnome` 或 `denial` |
 | `ROOTFS_SIZE_MB` | `4096` | rootfs 镜像逻辑大小 |
+| `ROOTFS_FS` | `ext4` | `ext4` 或 `btrfs` |
+| `ROOTFS_BTRFS_OPTIONS` | `compress=zstd:3,noatime` | btrfs 的挂载选项（写入 fstab） |
 | `ROOTFS_PARTLABEL` | `root` | 内核根分区 PARTLABEL |
 | `ROOTFS_KERNEL_CMDLINE` | `root=PARTLABEL=root rw rootwait` | boot.img 内核命令行 |
 
 rootfs 构建会把仓库复制到镜像内的 `/opt/sheng-repo`，不会写入仅宿主可见的
 `file://` 路径。它也不会先安装会与设备内核冲突的 `linux-aarch64`。mkinitcpio
 post hook 只生成 boot.img，本身没有任何分区写入代码。
+
+### btrfs 文件系统
+
+`--fs btrfs`（或 `ROOTFS_FS=btrfs`）会用 `mkfs.btrfs` 建立镜像，并写入
+`/etc/fstab` 应用 `ROOTFS_BTRFS_OPTIONS`（默认 `compress=zstd:3,noatime`，置空则
+只写 `rw`）。内核已内建 `CONFIG_BTRFS_FS=y`，initramfs 不需要额外模块，`root=`
+命令行与刷写流程都和 ext4 一致。校验使用只读的 `btrfs check`：它只报告问题、不会
+像 `e2fsck -fp` 那样修复，建议保留构建后的镜像副本。构建宿主需要 `btrfs-progs`。
+
+```bash
+make rootfs ROOTFS_ARGS='--desktop kde --fs btrfs --size 8192'
+```
+
+### Denial 桌面
+
+`make rootfs ROOTFS_ARGS='--desktop denial'` 会以 SDDM 自动登录直接进入
+[Denial](https://github.com/denialwm/denial)。Denial 只在其官方仓库发布 aarch64
+二进制包，因此构建时会下载 `packages.denialwm.org` 的仓库密钥、核对固定指纹
+`AE4108FA5E91E26BE0EE331E0F5B3AD16E023091` 后在镜像内本地签名，再安装
+`denial` 与 `denial-flutter-engine`。
+
+`ROOTFS_DENIAL_PROFILE`（默认 `mobile`，可选 `desktop`）会被写入
+`/etc/denial/session.conf`；平板形态建议保持 `mobile`。未指定用户名时只启用
+SDDM，不写入自动登录配置。Denial 官方的 `denial-plugin-manager` 体积较大
+（约 250 MiB），需要时用 `--extra` 单独安装。
 
 ## 安装后的服务
 
@@ -169,6 +211,18 @@ sudo systemctl enable --now qteesupplicant.service           # 指纹/QTEE
 sudo udevadm control --reload
 sudo udevadm trigger --subsystem-match=misc
 ```
+
+官方磁吸键盘的背光由 `xiaomi-sheng-keyboard-backlight` 提供：
+
+```bash
+sudo kbd-backlight 80        # 0-100；超出范围会触发键盘 MCU 复位
+kbd-backlight 0              # 关闭
+systemctl --user enable --now kbd-backlight-sync   # GNOME：跟随屏幕亮度与折叠状态
+```
+
+`kbd-backlight-sync` 是用户服务，内部通过 `sudo kbd-backlight` 改亮度；没有免密码
+sudo 时会静默失败。屏幕亮度同步依赖 GNOME 的 `SettingsDaemon.Power`，KDE 下只有
+手动命令可用。上游没有声明许可证，打包时标记为 `custom`。
 
 ## boot.img 与刷写
 

@@ -94,14 +94,15 @@ rootfs 不复制该路径，而是在镜像内生成 `file:///opt/sheng-repo` �
 
 `mkrootfs.sh` 的顺序如下：
 
-1. 创建稀疏 ext4 镜像并 loop mount；
+1. 创建稀疏 ext4 或 btrfs 镜像并 loop mount；
 2. pacstrap 基础用户态，不安装通用 `linux-aarch64`/`linux-firmware`；
 3. 把 `out/repo` 复制到镜像 `/opt/sheng-repo`；
-4. 在 chroot 内一次安装清单中的 16 个设备包；
-5. 安装可选桌面和额外包，配置 locale、用户、网络；
+4. 在 chroot 内一次安装清单中的 17 个设备包；
+5. 安装可选桌面和额外包，配置 locale、用户、网络；`--desktop denial` 会先配置
+   Denial 官方仓库并核对固定密钥指纹，再写入 SDDM 自动登录；
 6. 创建 `/boot/loader/entries/arch.conf`；
 7. 生成 initramfs 和 boot.img；mkinitcpio post hook 在结构上只负责构建；
-8. 导出 boot.img、卸载并用 e2fsck 验证 rootfs。
+8. 导出 boot.img、卸载并按文件系统用 e2fsck 或 btrfs check 验证 rootfs。
 
 包事务期间将 `MKINITCPIO_POST_HOOKS` 指向空位置，避免尚未生成 boot entry 时执行
 post hook。最后一次 mkinitcpio 只生成镜像；裸分区写入只存在于必须人工调用、单槽、
@@ -214,7 +215,7 @@ Rust/Cargo，并将部署服务从旧 `adsprpcd_*` 命名迁移为 `hexagonrpcd-
 - 对脚本执行 `bash -n`；安装了 shellcheck 时进一步静态检查；
 - 比较包清单、构建阶段和实际 PKGBUILD 目录；
 - 检查本地文件包确实引用 `files.tar.gz`；
-- 用 `makepkg --printsrcinfo` 验证 16 个 PKGBUILD 元数据。
+- 用 `makepkg --printsrcinfo` 验证 19 个 PKGBUILD 元数据。
 
 完整验证分层进行：
 
@@ -222,7 +223,7 @@ Rust/Cargo，并将部署服务从旧 `adsprpcd_*` 命名迁移为 `hexagonrpcd-
 2. 重复运行 `make files` 并比较哈希；
 3. 单独构建 `hexagonrpc`，执行其 Cargo workspace tests；
 4. clean chroot 构建全部包；
-5. rootfs 构建与 e2fsck；
+5. rootfs 构建与文件系统校验（`e2fsck -fp` 或只读 `btrfs check`）；
 6. 真机验证 FastRPC、传感器、触控、音频和 A/B 启动。
 
 CI 只执行第 1 层。涉及 aarch64、sudo、loop mount、设备节点或实际分区写入的测试

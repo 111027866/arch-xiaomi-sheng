@@ -130,6 +130,17 @@ jobs:
           # 用户；chroot 里没有这个用户的权限配置，表现为 "keyring is not writable"。
           sudo sed -i '/^\[options\]/a DisableSandbox' "$ALARM_ROOTFS/etc/pacman.conf"
           sudo chroot "$ALARM_ROOTFS" /bin/bash -euxo pipefail -c '
+            # 先固定单一镜像：mirror.archlinuxarm.org 的负载均衡后端同步不一致
+            # 时会按 db 去取已不存在的文件（404）或几乎不传输。devtools 复制
+            # chroot 时也会沿用这里解析出的 Server。
+            pin_mirror() {
+              printf "Server = http://ca.us.mirror.archlinuxarm.org/\$arch/\$repo\n" \
+                > /etc/pacman.d/mirrorlist
+              sed -i "s|^Server = .*mirror\.archlinuxarm\.org.*|Server = http://ca.us.mirror.archlinuxarm.org/\$arch/\$repo|" \
+                /etc/pacman.conf
+            }
+            pin_mirror
+
             # 解包出来的 keyring 权限/内容不完整时 pacman 会报 keyring is not writable
             # 和 required key missing；--init 会重建权限，随后重新导入 ALARM 密钥。
             pacman-key --init
@@ -140,7 +151,7 @@ jobs:
             [[ -s /etc/machine-id ]] || \
               tr -d '-' < /proc/sys/kernel/random/uuid > /etc/machine-id
 
-            pacman -Syu --needed --noconfirm \
+            pacman -Syu --needed --noconfirm --disable-download-timeout \
               base-devel git devtools arch-install-scripts ripgrep \
               sudo curl zstd e2fsprogs btrfs-progs util-linux
 
@@ -150,13 +161,8 @@ jobs:
 
             pacman -Scc --noconfirm
 
-            # mirror.archlinuxarm.org 的负载均衡后端同步不一致时，pacman 会按 db
-            # 去取已经不存在的文件而 404。固定到单一完整镜像，devtools 复制
-            # chroot 时也会沿用这里解析出的 Server。
-            printf "Server = http://ca.us.mirror.archlinuxarm.org/\$arch/\$repo\n" \
-              > /etc/pacman.d/mirrorlist
-            sed -i "s|^Server = .*mirror\.archlinuxarm\.org.*|Server = http://ca.us.mirror.archlinuxarm.org/\$arch/\$repo|" \
-              /etc/pacman.conf
+            # pacman-mirrorlist 会把 mirrorlist 写回社区默认值，重新固定一次。
+            pin_mirror
           '
 
       - name: Render build script

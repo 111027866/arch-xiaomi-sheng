@@ -114,9 +114,10 @@ jobs:
           # 这要求 chroot 的 / 本身是一个挂载点，因此先自 bind 一次。
           sudo mount --bind "$ALARM_ROOTFS" "$ALARM_ROOTFS"
           sudo mkdir -p "$ALARM_ROOTFS/dev/pts" "$ALARM_ROOTFS/proc" "$ALARM_ROOTFS/sys"
-          sudo mount --bind /proc "$ALARM_ROOTFS/proc"
-          sudo mount --bind /sys "$ALARM_ROOTFS/sys"
-          sudo mount --bind /dev "$ALARM_ROOTFS/dev"
+          sudo mount --rbind /proc "$ALARM_ROOTFS/proc"
+          # nspawn 需要 /sys/fs/cgroup（独立挂载），普通 --bind 不会带上子挂载。
+          sudo mount --rbind /sys "$ALARM_ROOTFS/sys"
+          sudo mount --rbind /dev "$ALARM_ROOTFS/dev"
           sudo mount --bind /dev/pts "$ALARM_ROOTFS/dev/pts"
           # systemd-nspawn（devtools 的 arch-nspawn）需要宿主 systemd 的
           # /run/dbus 与 cgroup 委派；空的 tmpfs /run 会让它报

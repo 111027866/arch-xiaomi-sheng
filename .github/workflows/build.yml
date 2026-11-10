@@ -194,6 +194,25 @@ jobs:
           chown -R builder:builder /work
           su -s /bin/bash builder -c 'cd /work && make check'
 
+          # 预装全部 PKGBUILD 的构建依赖。clean chroot 是这一层的副本，之后
+          # makepkg --syncdeps 找不到缺包就不会联网，规避 ALARM 镜像 db 与文件
+          # 不同步造成的 404。
+          su -s /bin/bash builder -c '
+            for dir in /work/pkgs/*/; do
+              ( cd "$dir" && makepkg --printsrcinfo )
+            done
+          ' > /tmp/srcinfo 2>/dev/null || true
+
+          mapfile -t build_deps < <(
+            awk -F' = ' '/depends/ { print $2 }' /tmp/srcinfo |
+              sed 's/[<>=].*//' | sort -u
+          )
+          if ((${#build_deps[@]} > 0)); then
+            echo "== 预装 ${#build_deps[@]} 个构建依赖"
+            pacman -S --needed --noconfirm --disable-download-timeout \
+              "${build_deps[@]}" || echo "WARN: 部分构建依赖预装失败"
+          fi
+
           # /work 保持 builder 所有：makechrootpkg 以该用户下载源码并打包，
           # 目录归 root 会报 "You do not have write permission for $SRCDEST"。
 

@@ -124,7 +124,10 @@ jobs:
           # 用户；chroot 里没有这个用户的权限配置，表现为 "keyring is not writable"。
           sudo sed -i '/^\[options\]/a DisableSandbox' "$ALARM_ROOTFS/etc/pacman.conf"
           sudo chroot "$ALARM_ROOTFS" /bin/bash -euxo pipefail -c '
-            pacman-key --populate archlinuxarm || true
+            # 解包出来的 keyring 权限/内容不完整时 pacman 会报 keyring is not writable
+            # 和 required key missing；--init 会重建权限，随后重新导入 ALARM 密钥。
+            pacman-key --init
+            pacman-key --populate archlinuxarm
             pacman -Syu --needed --noconfirm \
               base-devel git devtools arch-install-scripts ripgrep \
               sudo curl zstd e2fsprogs btrfs-progs util-linux

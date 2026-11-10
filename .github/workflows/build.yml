@@ -179,7 +179,9 @@ jobs:
           # makepkg 拒绝以 root 运行；make check 用普通用户执行。
           chown -R builder:builder /work
           su -s /bin/bash builder -c 'cd /work && make check'
-          chown -R root:root /work
+
+          # /work 保持 builder 所有：makechrootpkg 以该用户下载源码并打包，
+          # 目录归 root 会报 "You do not have write permission for $SRCDEST"。
 
           # devtools 的 makechrootpkg 用 $SUDO_USER/$USER 决定 chroot 副本名和
           # 打包用户；GitHub runner 的用户（runner）在 chroot 里不存在。

@@ -181,7 +181,9 @@ jobs:
           su -s /bin/bash builder -c 'cd /work && make check'
           chown -R root:root /work
 
-          bash /work/scripts/build-pkgs.sh
+          # devtools 的 makechrootpkg 用 $SUDO_USER/$USER 决定 chroot 副本名和
+          # 打包用户；GitHub runner 的用户（runner）在 chroot 里不存在。
+          USER=builder SUDO_USER=builder bash /work/scripts/build-pkgs.sh
 
           # 先释放中间产物，避免 4 GiB 镜像与 chroot 争抢 runner 磁盘。
           rm -rf /var/cache/pacman/pkg/* /var/lib/archbuild/* 2>/dev/null || true

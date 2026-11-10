@@ -132,6 +132,12 @@ jobs:
             # 和 required key missing；--init 会重建权限，随后重新导入 ALARM 密钥。
             pacman-key --init
             pacman-key --populate archlinuxarm
+
+            # mkarchroot 会执行 systemd-machine-id-setup --root=...，它需要宿主
+            # chroot 自己也有 machine-id，否则报 "No medium found" 并让 nspawn 退出。
+            [[ -s /etc/machine-id ]] || \
+              tr -d '-' < /proc/sys/kernel/random/uuid > /etc/machine-id
+
             pacman -Syu --needed --noconfirm \
               base-devel git devtools arch-install-scripts ripgrep \
               sudo curl zstd e2fsprogs btrfs-progs util-linux

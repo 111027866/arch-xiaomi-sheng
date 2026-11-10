@@ -1,0 +1,58 @@
+# Maintainer: Jacobi Lie <jssnlzxcr@gmail.com>
+pkgname=xiaomi-sheng-keyboard-backlight
+pkgver=1.0
+_commit=a79b59f0f3772b98c9208c66c5e1ac8feaa8c24d
+pkgrel=1
+pkgdesc="Keyboard backlight control for the Xiaomi Pad 6S Pro official keyboard"
+arch=('aarch64')
+url="https://github.com/slhssb/xiaomi-sheng-keyboard-backlight"
+# 上游仓库没有声明许可证，这里只能标记为 custom。
+license=('custom')
+depends=('python' 'systemd')
+optdepends=(
+  'python-gobject: follow screen brightness and fold state (GNOME only)'
+  'sudo: let kbd-backlight-sync change brightness from a user session'
+)
+backup=('etc/kbd-backlight-sync.conf')
+source=("${pkgname}::git+${url}.git#commit=${_commit}")
+sha256sums=('SKIP')
+
+package() {
+  cd "${pkgname}"
+
+  # 上游按 sudo 安装到 /usr/local/sbin；Arch 打包规范要求放在 /usr/bin，
+  # 因此脚本、user unit 与 udev 规则里的路径在这里统一改写。
+  install -Dm755 kbd-backlight "${pkgdir}/usr/bin/kbd-backlight"
+
+  install -d -m 755 "${pkgdir}/usr/bin"
+  sed 's|/usr/local/sbin/|/usr/bin/|g' kbd-backlight-sync \
+    > "${pkgdir}/usr/bin/kbd-backlight-sync"
+  chmod 755 "${pkgdir}/usr/bin/kbd-backlight-sync"
+
+  install -Dm644 kbd-backlight-sync.conf "${pkgdir}/etc/kbd-backlight-sync.conf"
+
+  install -d -m 755 "${pkgdir}/usr/lib/systemd/user"
+  sed 's|/usr/local/sbin/|/usr/bin/|g' kbd-backlight-sync.service \
+    > "${pkgdir}/usr/lib/systemd/user/kbd-backlight-sync.service"
+  chmod 644 "${pkgdir}/usr/lib/systemd/user/kbd-backlight-sync.service"
+
+  install -d -m 755 "${pkgdir}/usr/lib/udev/rules.d"
+  sed 's|/usr/local/sbin/|/usr/bin/|g' 90-kbd-backlight.rules \
+    > "${pkgdir}/usr/lib/udev/rules.d/90-kbd-backlight.rules"
+  chmod 644 "${pkgdir}/usr/lib/udev/rules.d/90-kbd-backlight.rules"
+
+  # udev 规则调用 kbd-backlight-udev，但上游没有提供这个脚本；这里补一个
+  # 最小实现：重新接上键盘时恢复 /etc/kbd-backlight 里保存的亮度。
+  cat > "${pkgdir}/usr/bin/kbd-backlight-udev" <<'EOF'
+#!/bin/sh
+# Re-apply the persisted keyboard backlight brightness after (re)attach.
+[ -r /etc/kbd-backlight ] || exit 0
+value="$(cat /etc/kbd-backlight)"
+case "$value" in
+  ''|*[!0-9]*) exit 0 ;;
+esac
+[ "$value" -le 100 ] || exit 0
+exec /usr/bin/kbd-backlight "$value"
+EOF
+  chmod 755 "${pkgdir}/usr/bin/kbd-backlight-udev"
+}

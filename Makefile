@@ -46,7 +46,7 @@ help:
 	@echo "  check    检查脚本、包清单和 PKGBUILD 元数据"
 	@echo "  audit-device  只读审计当前设备的 UFS/GPT、A/B 槽与启动模式"
 	@echo "  files    生成本地 files.tar.gz 归档"
-	@echo "  build    在 clean chroot 中按阶段构建全部 16 个包"
+	@echo "  build    在 clean chroot 中按阶段构建全部 19 个包"
 	@echo "  repo     将 out/pkgs/ 注册为本地 pacman 仓库"
 	@echo "  rootfs   组装可刷写的 rootfs.img 与 boot.img"
 	@echo "  clean    清理构建产物（--keep-cache 保留源码缓存）"

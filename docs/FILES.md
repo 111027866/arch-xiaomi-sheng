@@ -33,6 +33,7 @@ make files
 | `xiaomi-sheng-devauth` | debian-sheng 服务/drop-in | 合并 qteesupplicant 依赖 |
 | `xiaomi-sheng-fingerprint` | 上游 0.1.4 | 私有 libfprint、QTEE listener 与 Arch systemd 路径 |
 | `xiaomi-sheng-keyboard-helper` | 上游 0.2.0 | 私有程序路径；sensors PD 服务名迁移到 HexagonRPC 0.6.0 |
+| `xiaomi-sheng-keyboard-backlight` | 上游 commit `a79b59f` | 无本地文件；打包时把 `/usr/local/sbin` 统一改到 `/usr/bin`，并补上 udev 规则引用但上游缺失的 `kbd-backlight-udev` |
 | `xiaomi-sheng-thp` | 上游 0.3.9 | 私有程序路径；保留 `RuntimeDirectory` |
 
 HexagonRPC 0.6.0 自行安装 systemd、udev、sysusers 和通用配置。本仓库的

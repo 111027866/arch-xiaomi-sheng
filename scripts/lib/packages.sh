@@ -8,7 +8,7 @@ declare -Ar PACKAGES_BY_STAGE=(
   [0]="hexagonrpc libksysguard libssc linux-firmware-sheng linux-xiaomi-sheng"
   [1]="iio-sensor-proxy ksystemstats"
   [2]="xiaomi-sheng-rfsa xiaomi-sheng-sensors"
-  [3]="alsa-ucm-xiaomi-sheng xiaomi-charger-mode mkinitcpio-bootflash xiaomi-sheng-devauth xiaomi-mipps-auth xiaomi-pen-status xiaomi-sheng-fingerprint xiaomi-sheng-keyboard-helper xiaomi-sheng-thp"
+  [3]="alsa-ucm-xiaomi-sheng xiaomi-charger-mode mkinitcpio-bootflash xiaomi-sheng-devauth xiaomi-mipps-auth xiaomi-pen-status xiaomi-sheng-fingerprint xiaomi-sheng-keyboard-backlight xiaomi-sheng-keyboard-helper xiaomi-sheng-thp"
 )
 
 # Internal packages that must be injected into the clean chroot before build.

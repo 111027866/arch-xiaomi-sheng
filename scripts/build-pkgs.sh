@@ -121,6 +121,9 @@ find_dependency_package() {
 }
 
 init_chroot() {
+  # mkarchroot 用 readlink -f 规范化 working-dir：父目录不存在时结果为空，
+  # 会误报 "Please specify a working directory"。先确保父目录存在。
+  mkdir -p "$BUILD_CHROOT"
   if [[ ! -d "$BUILD_CHROOT/root" ]]; then
     msg "初始化 clean chroot: $BUILD_CHROOT"
     mkarchroot "$BUILD_CHROOT/root" base-devel

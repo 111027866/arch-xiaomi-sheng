@@ -100,7 +100,13 @@ jobs:
           sudo mkdir -p "$ALARM_ROOTFS"
           sudo tar -xpf /tmp/alarm.tar.gz -C "$ALARM_ROOTFS"
           rm -f /tmp/alarm.tar.gz
-          sudo cp /etc/resolv.conf "$ALARM_ROOTFS/etc/resolv.conf"
+          # ALARM 的 /etc/resolv.conf 可能是绝对符号链接（指向 chroot 内不存在的
+          # /run/...），直接 cp 会写到宿主那个路径，chroot 里仍然是悬空链接。
+          sudo rm -f "$ALARM_ROOTFS/etc/resolv.conf"
+          sudo cp -L /etc/resolv.conf "$ALARM_ROOTFS/etc/resolv.conf"
+          if ! grep -qE '^nameserver [0-9]' "$ALARM_ROOTFS/etc/resolv.conf"; then
+            echo 'nameserver 1.1.1.1' | sudo tee -a "$ALARM_ROOTFS/etc/resolv.conf" >/dev/null
+          fi
 
       - name: Enter the ALARM chroot and bootstrap build tools
         run: |

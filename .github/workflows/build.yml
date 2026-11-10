@@ -149,6 +149,14 @@ jobs:
               echo "shellcheck 不可用，make check 将只做 bash -n"
 
             pacman -Scc --noconfirm
+
+            # mirror.archlinuxarm.org 的负载均衡后端同步不一致时，pacman 会按 db
+            # 去取已经不存在的文件而 404。固定到单一完整镜像，devtools 复制
+            # chroot 时也会沿用这里解析出的 Server。
+            printf "Server = http://ca.us.mirror.archlinuxarm.org/\$arch/\$repo\n" \
+              > /etc/pacman.d/mirrorlist
+            sed -i "s|^Server = .*mirror\.archlinuxarm\.org.*|Server = http://ca.us.mirror.archlinuxarm.org/\$arch/\$repo|" \
+              /etc/pacman.conf
           '
 
       - name: Render build script

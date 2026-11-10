@@ -120,7 +120,11 @@ jobs:
           sudo mount --bind /dev/pts "$ALARM_ROOTFS/dev/pts"
           sudo install -d -m 0755 "$ALARM_ROOTFS/work"
           sudo cp -a "$GITHUB_WORKSPACE/." "$ALARM_ROOTFS/work/"
+          # 宿主机内核支持 Landlock 时 pacman 7 会把下载/签名子进程降权到 alpm
+          # 用户；chroot 里没有这个用户的权限配置，表现为 "keyring is not writable"。
+          sudo sed -i '/^\[options\]/a DisableSandbox' "$ALARM_ROOTFS/etc/pacman.conf"
           sudo chroot "$ALARM_ROOTFS" /bin/bash -euxo pipefail -c '
+            pacman-key --populate archlinuxarm || true
             pacman -Syu --needed --noconfirm \
               base-devel git devtools arch-install-scripts ripgrep \
               sudo curl zstd e2fsprogs btrfs-progs util-linux

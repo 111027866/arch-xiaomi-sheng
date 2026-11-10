@@ -118,10 +118,11 @@ jobs:
           sudo mount --bind /sys "$ALARM_ROOTFS/sys"
           sudo mount --bind /dev "$ALARM_ROOTFS/dev"
           sudo mount --bind /dev/pts "$ALARM_ROOTFS/dev/pts"
-          # systemd-nspawn（devtools 的 arch-nspawn）需要一个真正的 /run 挂载点，
-          # 否则清理 propagate 目录时会报 "Attempted to remove disk file system"。
+          # systemd-nspawn（devtools 的 arch-nspawn）需要宿主 systemd 的
+          # /run/dbus 与 cgroup 委派；空的 tmpfs /run 会让它报
+          # "Failed to open system bus"。因此直接共享宿主的 /run。
           sudo mkdir -p "$ALARM_ROOTFS/run"
-          sudo mount -t tmpfs -o mode=755 tmpfs "$ALARM_ROOTFS/run"
+          sudo mount --bind /run "$ALARM_ROOTFS/run"
           sudo install -d -m 0755 "$ALARM_ROOTFS/work"
           sudo cp -a "$GITHUB_WORKSPACE/." "$ALARM_ROOTFS/work/"
           # 宿主机内核支持 Landlock 时 pacman 7 会把下载/签名子进程降权到 alpm

@@ -3,7 +3,8 @@
 
 set -euo pipefail
 
-readonly PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly PROJECT_DIR
 readonly SLOT_TOOL="$PROJECT_DIR/files/install/mkinitcpio-bootflash/sheng-boot-slot"
 
 warn() {

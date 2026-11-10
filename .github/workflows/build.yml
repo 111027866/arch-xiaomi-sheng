@@ -1,0 +1,233 @@
+name: Build rootfs
+
+# 在线构建可刷写的 rootfs.img 与 boot.img。
+#
+# 这里刻意使用 GitHub 的 arm64 runner：整个流程要在原生 aarch64 上运行
+# pacstrap、devtools 的 clean chroot 和 loop mount。若仓库不可用 arm64
+# runner，把 runner 输入改成自建 aarch64 机器即可（需要 sudo 与 loop 设备）。
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: '运行构建的 runner 标签（必须是 aarch64 Linux）'
+        type: string
+        default: 'ubuntu-24.04-arm'
+      desktop:
+        description: '桌面环境'
+        type: choice
+        options:
+          - none
+          - kde
+          - gnome
+          - denial
+        default: none
+      denial_profile:
+        description: 'Denial shell profile（仅 desktop=denial）'
+        type: choice
+        options:
+          - mobile
+          - desktop
+        default: mobile
+      rootfs_size:
+        description: 'rootfs 镜像大小（MiB）'
+        type: string
+        default: '4096'
+      filesystem:
+        description: 'rootfs 文件系统（btrfs 默认启用 zstd 压缩与 noatime）'
+        type: choice
+        options:
+          - ext4
+          - btrfs
+        default: ext4
+      partlabel:
+        description: '内核 root=PARTLABEL= 值'
+        type: string
+        default: 'root'
+      username:
+        description: '普通用户名（默认 alarm；留空则沿用 mkrootfs.sh 的默认值）'
+        type: string
+        default: 'alarm'
+      hostname:
+        description: '主机名'
+        type: string
+        default: 'sheng'
+      extra_packages:
+        description: '额外 pacman 包（空格分隔，留空为无）'
+        type: string
+        default: ''
+      retention_days:
+        description: '构建产物保留天数'
+        type: string
+        default: '14'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: rootfs (${{ inputs.desktop }}, ${{ inputs.filesystem }})
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 300
+    env:
+      ALARM_ROOTFS: /mnt/alarm
+      DESKTOP: ${{ inputs.desktop }}
+      DENIAL_PROFILE: ${{ inputs.denial_profile }}
+      IMAGE_SIZE_MB: ${{ inputs.rootfs_size }}
+      FILESYSTEM: ${{ inputs.filesystem }}
+      PARTLABEL: ${{ inputs.partlabel }}
+      ROOTFS_USER: ${{ inputs.username }}
+      HOSTNAME_INPUT: ${{ inputs.hostname }}
+      EXTRA_PACKAGES: ${{ inputs.extra_packages }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates curl zstd
+          df -h / /tmp
+          uname -m
+
+      - name: Fetch Arch Linux ARM root filesystem
+        run: |
+          curl -fsSL --retry 3 --retry-delay 5 -o /tmp/alarm.tar.gz \
+            https://archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
+          sudo mkdir -p "$ALARM_ROOTFS"
+          sudo tar -xpf /tmp/alarm.tar.gz -C "$ALARM_ROOTFS"
+          rm -f /tmp/alarm.tar.gz
+          sudo cp /etc/resolv.conf "$ALARM_ROOTFS/etc/resolv.conf"
+
+      - name: Enter the ALARM chroot and bootstrap build tools
+        run: |
+          # pacstrap/mkarchroot 会在 chroot 内执行 unshare + mount --make-rprivate /，
+          # 这要求 chroot 的 / 本身是一个挂载点，因此先自 bind 一次。
+          sudo mount --bind "$ALARM_ROOTFS" "$ALARM_ROOTFS"
+          sudo mkdir -p "$ALARM_ROOTFS/dev/pts" "$ALARM_ROOTFS/proc" "$ALARM_ROOTFS/sys"
+          sudo mount --bind /proc "$ALARM_ROOTFS/proc"
+          sudo mount --bind /sys "$ALARM_ROOTFS/sys"
+          sudo mount --bind /dev "$ALARM_ROOTFS/dev"
+          sudo mount --bind /dev/pts "$ALARM_ROOTFS/dev/pts"
+          sudo install -d -m 0755 "$ALARM_ROOTFS/work"
+          sudo cp -a "$GITHUB_WORKSPACE/." "$ALARM_ROOTFS/work/"
+          sudo chroot "$ALARM_ROOTFS" /bin/bash -euxo pipefail -c '
+            pacman -Syu --needed --noconfirm \
+              base-devel git devtools arch-install-scripts ripgrep \
+              sudo curl zstd e2fsprogs btrfs-progs util-linux
+
+            # Arch Linux ARM 没有 shellcheck；check.sh 会自动退回 bash -n。
+            pacman -S --needed --noconfirm shellcheck || \
+              echo "shellcheck 不可用，make check 将只做 bash -n"
+
+            pacman -Scc --noconfirm
+          '
+
+      - name: Render build script
+        run: |
+          cat > "$RUNNER_TEMP/build.sh" <<'SCRIPT'
+          #!/bin/bash
+          set -euo pipefail
+          cd /work
+
+          args=(
+            --size "${IMAGE_SIZE_MB:-4096}"
+            --fs "${FILESYSTEM:-ext4}"
+            --partlabel "${PARTLABEL:-root}"
+          )
+          [[ -z "${HOSTNAME_INPUT:-}" ]] || args+=(--hostname "$HOSTNAME_INPUT")
+          [[ -z "${ROOTFS_USER:-}" ]] || args+=(--user "$ROOTFS_USER")
+          [[ -z "${EXTRA_PACKAGES:-}" ]] || args+=(--extra "$EXTRA_PACKAGES")
+          args+=(--desktop "${DESKTOP:-none}")
+
+          [[ -n "${ROOTFS_PASSWORD:-}" ]] || export ROOTFS_PASSWORD=password
+          if [[ "${DESKTOP:-none}" == denial ]]; then
+            export ROOTFS_DENIAL_PROFILE="${DENIAL_PROFILE:-mobile}"
+          fi
+
+          echo "== desktop=${DESKTOP:-none} fs=${FILESYSTEM:-ext4} args=${args[*]}"
+          id -u builder >/dev/null 2>&1 || useradd -m -s /bin/bash builder
+
+          # makepkg 拒绝以 root 运行；make check 用普通用户执行。
+          chown -R builder:builder /work
+          su -s /bin/bash builder -c 'cd /work && make check'
+          chown -R root:root /work
+
+          bash /work/scripts/build-pkgs.sh
+
+          # 先释放中间产物，避免 4 GiB 镜像与 chroot 争抢 runner 磁盘。
+          rm -rf /var/cache/pacman/pkg/* /var/lib/archbuild/* 2>/dev/null || true
+
+          bash /work/scripts/build-repo.sh
+          bash /work/scripts/mkrootfs.sh "${args[@]}"
+          SCRIPT
+          sudo install -m 0755 "$RUNNER_TEMP/build.sh" "$ALARM_ROOTFS/tmp/build.sh"
+
+      - name: Build packages, repository and images
+        env:
+          ROOTFS_PASSWORD: ${{ secrets.ROOTFS_PASSWORD }}
+        run: |
+          if [[ -z "${ROOTFS_PASSWORD:-}" ]]; then
+            export ROOTFS_PASSWORD=password
+          else
+            echo "::add-mask::$ROOTFS_PASSWORD"
+          fi
+          sudo chroot "$ALARM_ROOTFS" /usr/bin/env \
+            DESKTOP="$DESKTOP" \
+            DENIAL_PROFILE="$DENIAL_PROFILE" \
+            IMAGE_SIZE_MB="$IMAGE_SIZE_MB" \
+            FILESYSTEM="$FILESYSTEM" \
+            PARTLABEL="$PARTLABEL" \
+            ROOTFS_USER="$ROOTFS_USER" \
+            HOSTNAME_INPUT="$HOSTNAME_INPUT" \
+            EXTRA_PACKAGES="$EXTRA_PACKAGES" \
+            ROOTFS_PASSWORD="$ROOTFS_PASSWORD" \
+            /bin/bash /tmp/build.sh
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          sudo cp "$ALARM_ROOTFS/work/out/rootfs/boot.img" dist/
+          sudo zstd -T0 -3 -q -f "$ALARM_ROOTFS/work/out/rootfs/rootfs.img" \
+            -o dist/rootfs.img.zst
+          sudo chown -R "$(id -u):$(id -g)" dist
+          (cd dist && sha256sum boot.img rootfs.img.zst > SHA256SUMS)
+          ls -lh dist
+          {
+            echo "### rootfs ($DESKTOP, ${FILESYSTEM:-ext4})"
+            echo ""
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload rootfs
+        uses: actions/upload-artifact@v7
+        with:
+          name: rootfs-${{ inputs.filesystem }}-${{ inputs.desktop }}-${{ inputs.rootfs_size }}m
+          path: dist/rootfs.img.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: ${{ inputs.retention_days }}
+
+      - name: Upload boot image
+        uses: actions/upload-artifact@v7
+        with:
+          name: boot-${{ inputs.filesystem }}-${{ inputs.desktop }}-${{ inputs.rootfs_size }}m
+          path: |
+            dist/boot.img
+            dist/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: ${{ inputs.retention_days }}
+
+      - name: Unmount chroot
+        if: always()
+        run: |
+          sudo umount -R "$ALARM_ROOTFS/dev" 2>/dev/null || true
+          sudo umount -R "$ALARM_ROOTFS/sys" 2>/dev/null || true
+          sudo umount -R "$ALARM_ROOTFS/proc" 2>/dev/null || true
+          sudo umount "$ALARM_ROOTFS" 2>/dev/null || true

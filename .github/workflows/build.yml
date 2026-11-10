@@ -118,6 +118,10 @@ jobs:
           sudo mount --bind /sys "$ALARM_ROOTFS/sys"
           sudo mount --bind /dev "$ALARM_ROOTFS/dev"
           sudo mount --bind /dev/pts "$ALARM_ROOTFS/dev/pts"
+          # systemd-nspawn（devtools 的 arch-nspawn）需要一个真正的 /run 挂载点，
+          # 否则清理 propagate 目录时会报 "Attempted to remove disk file system"。
+          sudo mkdir -p "$ALARM_ROOTFS/run"
+          sudo mount -t tmpfs -o mode=755 tmpfs "$ALARM_ROOTFS/run"
           sudo install -d -m 0755 "$ALARM_ROOTFS/work"
           sudo cp -a "$GITHUB_WORKSPACE/." "$ALARM_ROOTFS/work/"
           # 宿主机内核支持 Landlock 时 pacman 7 会把下载/签名子进程降权到 alpm
@@ -243,4 +247,5 @@ jobs:
           sudo umount -R "$ALARM_ROOTFS/dev" 2>/dev/null || true
           sudo umount -R "$ALARM_ROOTFS/sys" 2>/dev/null || true
           sudo umount -R "$ALARM_ROOTFS/proc" 2>/dev/null || true
+          sudo umount "$ALARM_ROOTFS/run" 2>/dev/null || true
           sudo umount "$ALARM_ROOTFS" 2>/dev/null || true

@@ -155,7 +155,7 @@ configure_denial_repository() {
 
 configure_denial_session() {
   msg "配置 Denial 会话（shell profile: $ROOTFS_DENIAL_PROFILE）"
-  printf '\n# Added by arch-xiaomi-sheng: 平板默认使用 mobile shell。\nDENIAL_SHELL_PROFILE=%s\n' \
+  printf '\n# Added by arch-xiaomi-sheng: Denial shell profile (desktop/mobile).\nDENIAL_SHELL_PROFILE=%s\n' \
     "$ROOTFS_DENIAL_PROFILE" |
     sudo tee -a "$MOUNT_DIR/etc/denial/session.conf" >/dev/null
 

@@ -145,7 +145,7 @@ make rootfs ROOTFS_ARGS='--desktop kde --size 8192'
 ./scripts/mkrootfs.sh \
   --desktop gnome \
   --hostname sheng \
-  --user alarm \
+  --user theresa \
   --password 'change-me' \
   --partlabel linux \
   --size 8192
@@ -191,8 +191,8 @@ make rootfs ROOTFS_ARGS='--desktop kde --fs btrfs --size 8192'
 `AE4108FA5E91E26BE0EE331E0F5B3AD16E023091` 后在镜像内本地签名，再安装
 `denial` 与 `denial-flutter-engine`。
 
-`ROOTFS_DENIAL_PROFILE`（默认 `mobile`，可选 `desktop`）会被写入
-`/etc/denial/session.conf`；平板形态建议保持 `mobile`。未指定用户名时只启用
+`ROOTFS_DENIAL_PROFILE`（默认 `desktop`，可选 `mobile`）会被写入
+`/etc/denial/session.conf`；平板形态可改成 `mobile`。未指定用户名时只启用
 SDDM，不写入自动登录配置。Denial 官方的 `denial-plugin-manager` 体积较大
 （约 250 MiB），需要时用 `--extra` 单独安装。
 

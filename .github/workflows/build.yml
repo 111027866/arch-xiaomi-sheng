@@ -25,9 +25,9 @@ on:
         description: 'Denial shell profile（仅 desktop=denial）'
         type: choice
         options:
-          - mobile
           - desktop
-        default: mobile
+          - mobile
+        default: desktop
       filesystem:
         description: 'rootfs 文件系统（btrfs 默认启用 zstd 压缩与 noatime）'
         type: choice
@@ -44,9 +44,9 @@ on:
         type: string
         default: 'linux'
       username:
-        description: '普通用户名（默认 alarm；留空则沿用 mkrootfs.sh 的默认值）'
+        description: '普通用户名（默认 theresa；留空则沿用 mkrootfs.sh 的默认值）'
         type: string
-        default: 'alarm'
+        default: 'theresa'
       hostname:
         description: '主机名'
         type: string
@@ -221,7 +221,7 @@ jobs:
 
           [[ -n "${ROOTFS_PASSWORD:-}" ]] || export ROOTFS_PASSWORD=password
           if [[ "${DESKTOP:-none}" == denial ]]; then
-            export ROOTFS_DENIAL_PROFILE="${DENIAL_PROFILE:-mobile}"
+            export ROOTFS_DENIAL_PROFILE="${DENIAL_PROFILE:-desktop}"
           fi
 
           bash /work/scripts/mkrootfs.sh "${rootfs_args[@]}"

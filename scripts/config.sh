@@ -21,7 +21,7 @@ OUT_DIR="${OUT_DIR:-$PROJECT_DIR/out}"
 ROOTFS_DESKTOP="${ROOTFS_DESKTOP:-none}"       # none | kde | gnome
 ROOTFS_EXTRA_PKGS="${ROOTFS_EXTRA_PKGS:-}"      # 额外 pacman 包（空格分隔）
 ROOTFS_HOSTNAME="${ROOTFS_HOSTNAME:-sheng}"
-ROOTFS_USER="${ROOTFS_USER:-alarm}"
+ROOTFS_USER="${ROOTFS_USER:-theresa}"
 ROOTFS_PASSWORD="${ROOTFS_PASSWORD:-alarm}"
 ROOTFS_SIZE_MB="${ROOTFS_SIZE_MB:-4096}"         # rootfs.img 大小 (MiB)
 ROOTFS_FS="${ROOTFS_FS:-ext4}"                   # ext4 | btrfs
@@ -39,7 +39,7 @@ ROOTFS_DENIAL_REPO="${ROOTFS_DENIAL_REPO:-https://packages.denialwm.org/arch/\$a
 ROOTFS_DENIAL_KEY_URL="${ROOTFS_DENIAL_KEY_URL:-https://packages.denialwm.org/denial-repo-key.asc}"
 # 固定指纹：只有同时匹配该指纹的密钥才会被本地签名信任。
 ROOTFS_DENIAL_KEY_FINGERPRINT="${ROOTFS_DENIAL_KEY_FINGERPRINT:-AE4108FA5E91E26BE0EE331E0F5B3AD16E023091}"
-ROOTFS_DENIAL_PROFILE="${ROOTFS_DENIAL_PROFILE:-mobile}"   # mobile | desktop
+ROOTFS_DENIAL_PROFILE="${ROOTFS_DENIAL_PROFILE:-desktop}"  # mobile | desktop
 
 # ── 派生路径（通常不需修改） ──────────────────────────────
 PKG_DIR="$PROJECT_DIR/pkgs"

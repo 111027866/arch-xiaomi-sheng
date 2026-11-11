@@ -106,7 +106,9 @@ desktop_packages() {
       ;;
     denial)
       # Denial 自带 wayland-session 入口；SDDM 负责登录与自动登录。
-      printf '%s\n' denial sddm networkmanager
+      # Denial 不捆绑终端模拟器，桌面镜像里补 foot（Wayland 原生）和
+      # xterm（经 Xwayland 兜底），否则开机后没法执行命令。
+      printf '%s\n' denial sddm networkmanager foot xterm
       ;;
     none)
       ;;

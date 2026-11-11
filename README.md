@@ -196,6 +196,9 @@ make rootfs ROOTFS_ARGS='--desktop kde --fs btrfs --size 8192'
 SDDM，不写入自动登录配置。Denial 官方的 `denial-plugin-manager` 体积较大
 （约 250 MiB），需要时用 `--extra` 单独安装。
 
+Denial 不捆绑终端模拟器，镜像里会一并安装 `foot`（Wayland 原生）和 `xterm`
+（经 Xwayland 兜底），装完在应用启动器里就能找到。
+
 Denial 会拉入 GTK/Flutter 和 SDDM 的整套依赖，**4096 MiB 的镜像装不下**
 （实测还差约 100 MiB），请至少用 `--size 8192`；btrfs 还要为元数据 DUP 留余量。
 

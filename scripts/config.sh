@@ -29,7 +29,7 @@ ROOTFS_BTRFS_OPTIONS="${ROOTFS_BTRFS_OPTIONS:-compress=zstd:3,noatime}"
 # mkfs.btrfs 的 -O 特性列表；btrfs-progs 6.19+ 默认开启 block-group-tree，
 # 这里显式关闭以保持与旧内核/工具链的兼容性。留空则不传 -O。
 ROOTFS_BTRFS_FEATURES="${ROOTFS_BTRFS_FEATURES:-^block-group-tree}"
-ROOTFS_PARTLABEL="${ROOTFS_PARTLABEL:-root}"      # 内核 root=PARTLABEL= 值
+ROOTFS_PARTLABEL="${ROOTFS_PARTLABEL:-linux}"     # 内核 root=PARTLABEL= 值
 ROOTFS_KERNEL_CMDLINE="${ROOTFS_KERNEL_CMDLINE:-root=PARTLABEL=${ROOTFS_PARTLABEL} rw rootwait}"
 
 # ── Denial 桌面（--desktop denial）────────────────────────

@@ -147,7 +147,7 @@ make rootfs ROOTFS_ARGS='--desktop kde --size 8192'
   --hostname sheng \
   --user alarm \
   --password 'change-me' \
-  --partlabel root \
+  --partlabel linux \
   --size 8192
 ```
 
@@ -162,8 +162,8 @@ make rootfs ROOTFS_ARGS='--desktop kde --size 8192'
 | `ROOTFS_FS` | `ext4` | `ext4` 或 `btrfs` |
 | `ROOTFS_BTRFS_OPTIONS` | `compress=zstd:3,noatime` | btrfs 的挂载选项（写入 fstab） |
 | `ROOTFS_BTRFS_FEATURES` | `^block-group-tree` | `mkfs.btrfs -O` 的特性列表；默认关闭 block-group-tree |
-| `ROOTFS_PARTLABEL` | `root` | 内核根分区 PARTLABEL |
-| `ROOTFS_KERNEL_CMDLINE` | `root=PARTLABEL=root rw rootwait` | boot.img 内核命令行 |
+| `ROOTFS_PARTLABEL` | `linux` | 内核根分区 PARTLABEL |
+| `ROOTFS_KERNEL_CMDLINE` | `root=PARTLABEL=linux rw rootwait` | boot.img 内核命令行 |
 
 rootfs 构建会把仓库复制到镜像内的 `/opt/sheng-repo`，不会写入仅宿主可见的
 `file://` 路径。它也不会先安装会与设备内核冲突的 `linux-aarch64`。mkinitcpio
@@ -242,7 +242,7 @@ out/rootfs/boot.img
 外部 fastboot 刷写前必须先查询活动槽，并只选择非活动槽：
 
 ```bash
-fastboot flash root out/rootfs/rootfs.img
+fastboot flash linux out/rootfs/rootfs.img
 fastboot getvar current-slot
 fastboot flash boot_a out/rootfs/boot.img  # 仅当 A 已确认为非活动试验槽
 fastboot reboot

@@ -42,7 +42,7 @@ on:
       partlabel:
         description: '内核 root=PARTLABEL= 值'
         type: string
-        default: 'root'
+        default: 'linux'
       username:
         description: '普通用户名（默认 alarm；留空则沿用 mkrootfs.sh 的默认值）'
         type: string
@@ -213,7 +213,7 @@ jobs:
             --desktop "${DESKTOP:-none}"
             --fs "${FILESYSTEM:-ext4}"
             --size "${IMAGE_SIZE_MB:-4096}"
-            --partlabel "${PARTLABEL:-root}"
+            --partlabel "${PARTLABEL:-linux}"
           )
           [[ -z "${HOSTNAME_INPUT:-}" ]] || rootfs_args+=(--hostname "$HOSTNAME_INPUT")
           [[ -z "${ROOTFS_USER:-}" ]] || rootfs_args+=(--user "$ROOTFS_USER")

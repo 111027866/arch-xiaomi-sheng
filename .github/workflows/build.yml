@@ -2,14 +2,14 @@ name: Build rootfs
 
 # 在线构建可刷写的 rootfs.img 与 boot.img。
 #
-# 这里刻意使用 GitHub 的 arm64 runner：整个流程要在原生 aarch64 上运行
-# pacstrap、devtools 的 clean chroot 和 loop mount。若仓库不可用 arm64
-# runner，把 runner 输入改成自建 aarch64 机器即可（需要 sudo 与 loop 设备）。
+# 构建在 Arch Linux ARM 容器里完成：GitHub 的 arm64 runner 是原生 aarch64，
+# 把官方 ALARM rootfs 用 docker import 成镜像后即可直接运行 pacman/makepkg，
+# 不需要 chroot 套 devtools 的 clean chroot（那层嵌套在 CI 上问题很多）。
 on:
   workflow_dispatch:
     inputs:
       runner:
-        description: '运行构建的 runner 标签（必须是 aarch64 Linux）'
+        description: '运行构建的 runner 标签（必须是 aarch64 Linux，且带 Docker）'
         type: string
         default: 'ubuntu-24.04-arm'
       desktop:
@@ -28,10 +28,6 @@ on:
           - mobile
           - desktop
         default: mobile
-      rootfs_size:
-        description: 'rootfs 镜像大小（MiB）'
-        type: string
-        default: '4096'
       filesystem:
         description: 'rootfs 文件系统（btrfs 默认启用 zstd 压缩与 noatime）'
         type: choice
@@ -39,6 +35,10 @@ on:
           - ext4
           - btrfs
         default: ext4
+      rootfs_size:
+        description: 'rootfs 镜像大小（MiB）'
+        type: string
+        default: '4096'
       partlabel:
         description: '内核 root=PARTLABEL= 值'
         type: string
@@ -73,11 +73,10 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 300
     env:
-      ALARM_ROOTFS: /mnt/alarm
       DESKTOP: ${{ inputs.desktop }}
       DENIAL_PROFILE: ${{ inputs.denial_profile }}
-      IMAGE_SIZE_MB: ${{ inputs.rootfs_size }}
       FILESYSTEM: ${{ inputs.filesystem }}
+      IMAGE_SIZE_MB: ${{ inputs.rootfs_size }}
       PARTLABEL: ${{ inputs.partlabel }}
       ROOTFS_USER: ${{ inputs.username }}
       HOSTNAME_INPUT: ${{ inputs.hostname }}
@@ -92,141 +91,136 @@ jobs:
           sudo apt-get install -y --no-install-recommends ca-certificates curl zstd
           df -h / /tmp
           uname -m
+          docker version --format '{{.Server.Version}}'
 
-      - name: Fetch Arch Linux ARM root filesystem
+      - name: Import Arch Linux ARM container image
         run: |
           curl -fsSL --retry 3 --retry-delay 5 -o /tmp/alarm.tar.gz \
             https://archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
-          sudo mkdir -p "$ALARM_ROOTFS"
-          sudo tar -xpf /tmp/alarm.tar.gz -C "$ALARM_ROOTFS"
+          docker import /tmp/alarm.tar.gz alarm-build:latest
           rm -f /tmp/alarm.tar.gz
-          # ALARM 的 /etc/resolv.conf 可能是绝对符号链接（指向 chroot 内不存在的
-          # /run/...），直接 cp 会写到宿主那个路径，chroot 里仍然是悬空链接。
-          sudo rm -f "$ALARM_ROOTFS/etc/resolv.conf"
-          sudo cp -L /etc/resolv.conf "$ALARM_ROOTFS/etc/resolv.conf"
-          if ! grep -qE '^nameserver [0-9]' "$ALARM_ROOTFS/etc/resolv.conf"; then
-            echo 'nameserver 1.1.1.1' | sudo tee -a "$ALARM_ROOTFS/etc/resolv.conf" >/dev/null
-          fi
-
-      - name: Enter the ALARM chroot and bootstrap build tools
-        run: |
-          # pacstrap/mkarchroot 会在 chroot 内执行 unshare + mount --make-rprivate /，
-          # 这要求 chroot 的 / 本身是一个挂载点，因此先自 bind 一次。
-          sudo mount --bind "$ALARM_ROOTFS" "$ALARM_ROOTFS"
-          sudo mkdir -p "$ALARM_ROOTFS/dev/pts" "$ALARM_ROOTFS/proc" "$ALARM_ROOTFS/sys"
-          sudo mount --rbind /proc "$ALARM_ROOTFS/proc"
-          # nspawn 需要 /sys/fs/cgroup（独立挂载），普通 --bind 不会带上子挂载。
-          sudo mount --rbind /sys "$ALARM_ROOTFS/sys"
-          sudo mount --rbind /dev "$ALARM_ROOTFS/dev"
-          sudo mount --bind /dev/pts "$ALARM_ROOTFS/dev/pts"
-          # systemd-nspawn（devtools 的 arch-nspawn）需要宿主 systemd 的
-          # /run/dbus 与 cgroup 委派；空的 tmpfs /run 会让它报
-          # "Failed to open system bus"。因此直接共享宿主的 /run。
-          sudo mkdir -p "$ALARM_ROOTFS/run"
-          sudo mount --bind /run "$ALARM_ROOTFS/run"
-          sudo install -d -m 0755 "$ALARM_ROOTFS/work"
-          sudo cp -a "$GITHUB_WORKSPACE/." "$ALARM_ROOTFS/work/"
-          # 宿主机内核支持 Landlock 时 pacman 7 会把下载/签名子进程降权到 alpm
-          # 用户；chroot 里没有这个用户的权限配置，表现为 "keyring is not writable"。
-          sudo sed -i '/^\[options\]/a DisableSandbox' "$ALARM_ROOTFS/etc/pacman.conf"
-          sudo chroot "$ALARM_ROOTFS" /bin/bash -euxo pipefail -c '
-            # 先固定单一镜像：mirror.archlinuxarm.org 的负载均衡后端同步不一致
-            # 时会按 db 去取已不存在的文件（404）或几乎不传输。devtools 复制
-            # chroot 时也会沿用这里解析出的 Server。
-            pin_mirror() {
-              printf "Server = http://ca.us.mirror.archlinuxarm.org/\$arch/\$repo\n" \
-                > /etc/pacman.d/mirrorlist
-              sed -i "s|^Server = .*mirror\.archlinuxarm\.org.*|Server = http://ca.us.mirror.archlinuxarm.org/\$arch/\$repo|" \
-                /etc/pacman.conf
-            }
-            pin_mirror
-
-            # 解包出来的 keyring 权限/内容不完整时 pacman 会报 keyring is not writable
-            # 和 required key missing；--init 会重建权限，随后重新导入 ALARM 密钥。
-            pacman-key --init
-            pacman-key --populate archlinuxarm
-
-            # mkarchroot 会执行 systemd-machine-id-setup --root=...，它需要宿主
-            # chroot 自己也有 machine-id，否则报 "No medium found" 并让 nspawn 退出。
-            [[ -s /etc/machine-id ]] || \
-              tr -d '-' < /proc/sys/kernel/random/uuid > /etc/machine-id
-
-            pacman -Syu --needed --noconfirm --disable-download-timeout \
-              base-devel git devtools arch-install-scripts ripgrep \
-              sudo curl zstd e2fsprogs btrfs-progs util-linux
-
-            # Arch Linux ARM 没有 shellcheck；check.sh 会自动退回 bash -n。
-            pacman -S --needed --noconfirm shellcheck || \
-              echo "shellcheck 不可用，make check 将只做 bash -n"
-
-            pacman -Scc --noconfirm
-
-            # pacman-mirrorlist 会把 mirrorlist 写回社区默认值，重新固定一次。
-            pin_mirror
-          '
+          docker run --rm alarm-build:latest /bin/bash -c \
+            'uname -m; head -1 /etc/os-release; pacman -V | head -1'
 
       - name: Render build script
         run: |
-          cat > "$RUNNER_TEMP/build.sh" <<'SCRIPT'
+          cat > "$RUNNER_TEMP/ci-build.sh" <<'SCRIPT'
           #!/bin/bash
           set -euo pipefail
           cd /work
 
-          args=(
-            --size "${IMAGE_SIZE_MB:-4096}"
+          echo "== 环境"
+          uname -m
+          head -2 /etc/os-release
+
+          echo "== 初始化 pacman keyring"
+          pacman-key --init
+          pacman-key --populate archlinuxarm || true
+
+          # ALARM 镜像的 db 与文件偶尔不同步（典型表现是某个包 404）；每次安装前
+          # 重新同步 db 并重试，同时关闭低速中断。
+          install_retry() {
+            local -a pkgs=("$@")
+            local attempt
+            for attempt in 1 2 3; do
+              pacman -Sy --noconfirm --disable-download-timeout >/dev/null 2>&1 || true
+              if pacman -S --needed --noconfirm --disable-download-timeout "${pkgs[@]}"; then
+                return 0
+              fi
+              echo "!! 安装失败，第 ${attempt} 次重试"
+              sleep 10
+            done
+            return 1
+          }
+
+          echo "== 安装基础构建工具"
+          install_retry base-devel git sudo curl zstd e2fsprogs btrfs-progs \
+            arch-install-scripts
+
+          id -u builder >/dev/null 2>&1 || useradd -m -s /bin/bash builder
+          chown -R builder:builder /work
+
+          echo "== make check"
+          su -s /bin/bash builder -c 'cd /work && make check'
+
+          echo "== 汇总 PKGBUILD 依赖"
+          su -s /bin/bash builder -c '
+            for dir in /work/pkgs/*/; do
+              ( cd "$dir" && makepkg --printsrcinfo )
+            done
+          ' > /tmp/srcinfo
+
+          mapfile -t build_deps < <(
+            awk -F' = ' '/depends/ { print $2 }' /tmp/srcinfo |
+              sed 's/[<>=].*//' | sort -u
+          )
+
+          # 内部包（libssc、iio-sensor-proxy 等）不在官方仓库里，混进同一个
+          # 事务会让整批安装失败，先筛掉不可用的名字。
+          pacman -Sy --noconfirm --disable-download-timeout >/dev/null 2>&1 || true
+          available_deps=()
+          for dep in "${build_deps[@]}"; do
+            [[ -n "$dep" ]] || continue
+            pacman -Si "$dep" >/dev/null 2>&1 && available_deps+=("$dep")
+          done
+
+          if ((${#available_deps[@]} > 0)); then
+            echo "== 预装 ${#available_deps[@]} 个仓库依赖"
+            install_retry "${available_deps[@]}" || echo "WARN: 部分依赖未能安装，继续"
+          fi
+
+          echo "== 按阶段构建"
+          # shellcheck source=scripts/lib/packages.sh
+          source /work/scripts/lib/packages.sh
+          mkdir -p /work/out/pkgs
+
+          install_built() {
+            local name file
+            for name in "$@"; do
+              file="$(find /work/out/pkgs -maxdepth 1 -name "${name}-*.pkg.tar.*" -print -quit)"
+              [[ -n "$file" ]] || { echo "WARN: 找不到 $name 的构建产物"; continue; }
+              pacman -U --noconfirm "$file"
+            done
+          }
+
+          for stage in "${BUILD_STAGES[@]}"; do
+            echo "== 阶段 $stage: ${PACKAGES_BY_STAGE[$stage]}"
+            for name in ${PACKAGES_BY_STAGE[$stage]}; do
+              echo "== 构建 $name"
+              su -s /bin/bash builder -c \
+                "cd /work/pkgs/$name && makepkg -f --nodeps --noconfirm"
+              find "/work/pkgs/$name" -maxdepth 1 -name '*.pkg.tar.*' \
+                -exec mv -t /work/out/pkgs {} +
+            done
+            # 内部依赖包装进容器，供后续阶段使用
+            case "$stage" in
+              0) install_built hexagonrpc libksysguard libssc ;;
+              1) install_built iio-sensor-proxy ;;
+            esac
+          done
+
+          echo "== 生成本地仓库"
+          bash /work/scripts/build-repo.sh
+
+          echo "== 组装 rootfs"
+          rootfs_args=(
+            --desktop "${DESKTOP:-none}"
             --fs "${FILESYSTEM:-ext4}"
+            --size "${IMAGE_SIZE_MB:-4096}"
             --partlabel "${PARTLABEL:-root}"
           )
-          [[ -z "${HOSTNAME_INPUT:-}" ]] || args+=(--hostname "$HOSTNAME_INPUT")
-          [[ -z "${ROOTFS_USER:-}" ]] || args+=(--user "$ROOTFS_USER")
-          [[ -z "${EXTRA_PACKAGES:-}" ]] || args+=(--extra "$EXTRA_PACKAGES")
-          args+=(--desktop "${DESKTOP:-none}")
+          [[ -z "${HOSTNAME_INPUT:-}" ]] || rootfs_args+=(--hostname "$HOSTNAME_INPUT")
+          [[ -z "${ROOTFS_USER:-}" ]] || rootfs_args+=(--user "$ROOTFS_USER")
+          [[ -z "${EXTRA_PACKAGES:-}" ]] || rootfs_args+=(--extra "$EXTRA_PACKAGES")
 
           [[ -n "${ROOTFS_PASSWORD:-}" ]] || export ROOTFS_PASSWORD=password
           if [[ "${DESKTOP:-none}" == denial ]]; then
             export ROOTFS_DENIAL_PROFILE="${DENIAL_PROFILE:-mobile}"
           fi
 
-          echo "== desktop=${DESKTOP:-none} fs=${FILESYSTEM:-ext4} args=${args[*]}"
-          id -u builder >/dev/null 2>&1 || useradd -m -s /bin/bash builder
-
-          # makepkg 拒绝以 root 运行；make check 用普通用户执行。
-          chown -R builder:builder /work
-          su -s /bin/bash builder -c 'cd /work && make check'
-
-          # 预装全部 PKGBUILD 的构建依赖。clean chroot 是这一层的副本，之后
-          # makepkg --syncdeps 找不到缺包就不会联网，规避 ALARM 镜像 db 与文件
-          # 不同步造成的 404。
-          su -s /bin/bash builder -c '
-            for dir in /work/pkgs/*/; do
-              ( cd "$dir" && makepkg --printsrcinfo )
-            done
-          ' > /tmp/srcinfo 2>/dev/null || true
-
-          mapfile -t build_deps < <(
-            awk -F' = ' '/depends/ { print $2 }' /tmp/srcinfo |
-              sed 's/[<>=].*//' | sort -u
-          )
-          if ((${#build_deps[@]} > 0)); then
-            echo "== 预装 ${#build_deps[@]} 个构建依赖"
-            pacman -S --needed --noconfirm --disable-download-timeout \
-              "${build_deps[@]}" || echo "WARN: 部分构建依赖预装失败"
-          fi
-
-          # /work 保持 builder 所有：makechrootpkg 以该用户下载源码并打包，
-          # 目录归 root 会报 "You do not have write permission for $SRCDEST"。
-
-          # devtools 的 makechrootpkg 用 $SUDO_USER/$USER 决定 chroot 副本名和
-          # 打包用户；GitHub runner 的用户（runner）在 chroot 里不存在。
-          USER=builder SUDO_USER=builder bash /work/scripts/build-pkgs.sh
-
-          # 先释放中间产物，避免 4 GiB 镜像与 chroot 争抢 runner 磁盘。
-          rm -rf /var/cache/pacman/pkg/* /var/lib/archbuild/* 2>/dev/null || true
-
-          bash /work/scripts/build-repo.sh
-          bash /work/scripts/mkrootfs.sh "${args[@]}"
+          bash /work/scripts/mkrootfs.sh "${rootfs_args[@]}"
           SCRIPT
-          sudo install -m 0755 "$RUNNER_TEMP/build.sh" "$ALARM_ROOTFS/tmp/build.sh"
+          chmod +x "$RUNNER_TEMP/ci-build.sh"
 
       - name: Build packages, repository and images
         env:
@@ -237,29 +231,30 @@ jobs:
           else
             echo "::add-mask::$ROOTFS_PASSWORD"
           fi
-          sudo chroot "$ALARM_ROOTFS" /usr/bin/env \
-            DESKTOP="$DESKTOP" \
-            DENIAL_PROFILE="$DENIAL_PROFILE" \
-            IMAGE_SIZE_MB="$IMAGE_SIZE_MB" \
-            FILESYSTEM="$FILESYSTEM" \
-            PARTLABEL="$PARTLABEL" \
-            ROOTFS_USER="$ROOTFS_USER" \
-            HOSTNAME_INPUT="$HOSTNAME_INPUT" \
-            EXTRA_PACKAGES="$EXTRA_PACKAGES" \
-            ROOTFS_PASSWORD="$ROOTFS_PASSWORD" \
-            /bin/bash /tmp/build.sh
+          docker run --rm --privileged \
+            --volume "$PWD:/work" \
+            --volume "$RUNNER_TEMP/ci-build.sh:/ci-build.sh:ro" \
+            --env DESKTOP="$DESKTOP" \
+            --env DENIAL_PROFILE="$DENIAL_PROFILE" \
+            --env FILESYSTEM="$FILESYSTEM" \
+            --env IMAGE_SIZE_MB="$IMAGE_SIZE_MB" \
+            --env PARTLABEL="$PARTLABEL" \
+            --env ROOTFS_USER="$ROOTFS_USER" \
+            --env HOSTNAME_INPUT="$HOSTNAME_INPUT" \
+            --env EXTRA_PACKAGES="$EXTRA_PACKAGES" \
+            --env ROOTFS_PASSWORD="$ROOTFS_PASSWORD" \
+            alarm-build:latest /bin/bash /ci-build.sh
 
       - name: Collect artifacts
         run: |
           mkdir -p dist
-          sudo cp "$ALARM_ROOTFS/work/out/rootfs/boot.img" dist/
-          sudo zstd -T0 -3 -q -f "$ALARM_ROOTFS/work/out/rootfs/rootfs.img" \
-            -o dist/rootfs.img.zst
+          sudo cp "$PWD/out/rootfs/boot.img" dist/
+          sudo zstd -T0 -3 -q -f "$PWD/out/rootfs/rootfs.img" -o dist/rootfs.img.zst
           sudo chown -R "$(id -u):$(id -g)" dist
           (cd dist && sha256sum boot.img rootfs.img.zst > SHA256SUMS)
           ls -lh dist
           {
-            echo "### rootfs ($DESKTOP, ${FILESYSTEM:-ext4})"
+            echo "### rootfs ($DESKTOP, $FILESYSTEM)"
             echo ""
             echo '```'
             cat dist/SHA256SUMS
@@ -285,12 +280,3 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: ${{ inputs.retention_days }}
-
-      - name: Unmount chroot
-        if: always()
-        run: |
-          sudo umount -R "$ALARM_ROOTFS/dev" 2>/dev/null || true
-          sudo umount -R "$ALARM_ROOTFS/sys" 2>/dev/null || true
-          sudo umount -R "$ALARM_ROOTFS/proc" 2>/dev/null || true
-          sudo umount "$ALARM_ROOTFS/run" 2>/dev/null || true
-          sudo umount "$ALARM_ROOTFS" 2>/dev/null || true

@@ -193,6 +193,9 @@ make rootfs ROOTFS_ARGS='--desktop kde --fs btrfs --size 8192'
 SDDM，不写入自动登录配置。Denial 官方的 `denial-plugin-manager` 体积较大
 （约 250 MiB），需要时用 `--extra` 单独安装。
 
+Denial 会拉入 GTK/Flutter 和 SDDM 的整套依赖，**4096 MiB 的镜像装不下**
+（实测还差约 100 MiB），请至少用 `--size 8192`；btrfs 还要为元数据 DUP 留余量。
+
 ## 安装后的服务
 
 HexagonRPC、MiPPS 和 QTEE 入口均可由 udev 事件触发。以下长期服务按实际硬件

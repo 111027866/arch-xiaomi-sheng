@@ -135,7 +135,7 @@ jobs:
 
           echo "== 安装基础构建工具"
           install_retry base-devel git sudo curl zstd e2fsprogs btrfs-progs \
-            arch-install-scripts
+            arch-install-scripts ripgrep
 
           id -u builder >/dev/null 2>&1 || useradd -m -s /bin/bash builder
           chown -R builder:builder /work

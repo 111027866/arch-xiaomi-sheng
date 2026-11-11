@@ -257,8 +257,11 @@ main() {
 
   # Do not install the generic kernel/firmware: project packages provide the
   # device-specific replacements and would otherwise conflict in pacman.
+  # Do not pass -K: that initialises an *empty* keyring in the target and every
+  # package then fails verification with "signature is unknown trust"; without
+  # it pacstrap copies the host keyring, which is what a normal install does.
   msg "安装 Arch Linux ARM 基础系统"
-  sudo pacstrap -K "$MOUNT_DIR" "${base_pkgs[@]}"
+  sudo pacstrap "$MOUNT_DIR" "${base_pkgs[@]}"
 
   repository_in_rootfs="$MOUNT_DIR/opt/sheng-repo"
   sudo install -d -m 0755 "$repository_in_rootfs"

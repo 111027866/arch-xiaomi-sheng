@@ -17,6 +17,7 @@ depends=(
 )
 makedepends=(
   'gcc'
+  'glib2-devel'
   'meson'
   'ninja'
   'pkgconf'

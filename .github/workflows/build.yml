@@ -118,13 +118,14 @@ jobs:
           pacman-key --populate archlinuxarm || true
 
           # ALARM 镜像的 db 与文件偶尔不同步（典型表现是某个包 404）；每次安装前
-          # 重新同步 db 并重试，同时关闭低速中断。
+          # 重新同步 db 并重试，同时关闭低速中断。用 -Syu 做完整升级，避免只升级
+          # systemd 时与镜像里旧版 systemd-sysvcompat/resolvconf 冲突。
           install_retry() {
             local -a pkgs=("$@")
             local attempt
             for attempt in 1 2 3; do
-              pacman -Sy --noconfirm --disable-download-timeout >/dev/null 2>&1 || true
-              if pacman -S --needed --noconfirm --disable-download-timeout "${pkgs[@]}"; then
+              if pacman -Syu --needed --noconfirm --disable-download-timeout \
+                "${pkgs[@]}"; then
                 return 0
               fi
               echo "!! 安装失败，第 ${attempt} 次重试"
@@ -173,6 +174,11 @@ jobs:
           # shellcheck source=scripts/lib/packages.sh
           source /work/scripts/lib/packages.sh
           mkdir -p /work/out/pkgs
+
+          # 带本地文件的包（hexagonrpc、sensors、rfsa 等）在构建前需要
+          # 生成确定性的 files.tar.gz，build-pkgs.sh 平时会做，这里要自己来。
+          echo "== 生成本地 files.tar.gz"
+          su -s /bin/bash builder -c 'cd /work && bash scripts/package-files.sh'
 
           install_built() {
             local name file

@@ -121,7 +121,10 @@ denial_enabled() {
 }
 
 configure_denial_repository() {
-  local key_file="$MOUNT_DIR/tmp/denial-repo-key.asc"
+  # arch-chroot 会在目标 /tmp 上挂 tmpfs，写到镜像 /tmp 的密钥在 chroot 内看不到；
+  # 放在 /root 下，两边路径一致。
+  local key_path="/root/denial-repo-key.asc"
+  local key_file="$MOUNT_DIR$key_path"
   local fingerprint
 
   [[ -f "$MOUNT_DIR/etc/pacman.d/gnupg/trustdb.gpg" || \
@@ -129,7 +132,6 @@ configure_denial_repository() {
     die "pacman keyring 未初始化，无法信任 Denial 仓库密钥"
 
   msg "配置 Denial 软件源: $ROOTFS_DENIAL_REPO"
-  sudo install -d -m 0755 "$MOUNT_DIR/tmp"
   sudo curl -fsSL --retry 3 --connect-timeout 20 \
     -o "$key_file" "$ROOTFS_DENIAL_KEY_URL"
 
@@ -137,12 +139,12 @@ configure_denial_repository() {
   sudo arch-chroot "$MOUNT_DIR" pacman -S --needed --noconfirm gnupg
 
   fingerprint="$(sudo arch-chroot "$MOUNT_DIR" gpg --batch --with-colons \
-    --show-keys /tmp/denial-repo-key.asc |
+    --show-keys "$key_path" |
     awk -F: '$1 == "fpr" { print toupper($10); exit }')"
   [[ "$fingerprint" == "$ROOTFS_DENIAL_KEY_FINGERPRINT" ]] || \
     die "Denial 仓库密钥指纹不匹配: ${fingerprint:-<空>}"
 
-  sudo arch-chroot "$MOUNT_DIR" pacman-key --add /tmp/denial-repo-key.asc
+  sudo arch-chroot "$MOUNT_DIR" pacman-key --add "$key_path"
   sudo arch-chroot "$MOUNT_DIR" \
     pacman-key --lsign-key "$ROOTFS_DENIAL_KEY_FINGERPRINT"
   sudo rm -f "$key_file"
@@ -223,6 +225,9 @@ main() {
   )
 
   validate_options
+  if [[ "$ROOTFS_FS" == btrfs ]]; then
+    base_pkgs+=(btrfs-progs)
+  fi
   local -a fs_commands=()
   case "$ROOTFS_FS" in
     ext4) fs_commands=(e2fsck mkfs.ext4) ;;

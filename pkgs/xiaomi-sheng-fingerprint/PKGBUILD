@@ -20,6 +20,7 @@ makedepends=(
   'glib2-devel'
   'meson'
   'ninja'
+  'patchelf'
   'pkgconf'
   'git'
 )

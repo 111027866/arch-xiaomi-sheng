@@ -253,7 +253,12 @@ main() {
   msg "创建 $ROOTFS_FS 文件系统"
   case "$ROOTFS_FS" in
     ext4) mkfs.ext4 -F -L sheng-root "$rootfs_image" ;;
-    btrfs) mkfs.btrfs -f -L sheng-root "$rootfs_image" ;;
+    btrfs)
+      local -a btrfs_features=()
+      [[ -z "$ROOTFS_BTRFS_FEATURES" ]] || \
+        btrfs_features=(-O "$ROOTFS_BTRFS_FEATURES")
+      mkfs.btrfs -f "${btrfs_features[@]}" -L sheng-root "$rootfs_image"
+      ;;
   esac
 
   MOUNT_DIR="$(mktemp -d)"

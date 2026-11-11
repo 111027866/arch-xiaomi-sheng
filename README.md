@@ -161,6 +161,7 @@ make rootfs ROOTFS_ARGS='--desktop kde --size 8192'
 | `ROOTFS_SIZE_MB` | `4096` | rootfs 镜像逻辑大小 |
 | `ROOTFS_FS` | `ext4` | `ext4` 或 `btrfs` |
 | `ROOTFS_BTRFS_OPTIONS` | `compress=zstd:3,noatime` | btrfs 的挂载选项（写入 fstab） |
+| `ROOTFS_BTRFS_FEATURES` | `^block-group-tree` | `mkfs.btrfs -O` 的特性列表；默认关闭 block-group-tree |
 | `ROOTFS_PARTLABEL` | `root` | 内核根分区 PARTLABEL |
 | `ROOTFS_KERNEL_CMDLINE` | `root=PARTLABEL=root rw rootwait` | boot.img 内核命令行 |
 
@@ -172,7 +173,9 @@ post hook 只生成 boot.img，本身没有任何分区写入代码。
 
 `--fs btrfs`（或 `ROOTFS_FS=btrfs`）会用 `mkfs.btrfs` 建立镜像，并写入
 `/etc/fstab` 应用 `ROOTFS_BTRFS_OPTIONS`（默认 `compress=zstd:3,noatime`，置空则
-只写 `rw`）。内核已内建 `CONFIG_BTRFS_FS=y`，initramfs 不需要额外模块，`root=`
+只写 `rw`）。`ROOTFS_BTRFS_FEATURES` 会作为 `-O` 传给 `mkfs.btrfs`，默认
+`^block-group-tree`（btrfs-progs 6.19+ 默认开启它，这里显式关掉以保持兼容）；
+置空则不传 `-O`。内核已内建 `CONFIG_BTRFS_FS=y`，initramfs 不需要额外模块，`root=`
 命令行与刷写流程都和 ext4 一致。校验使用只读的 `btrfs check`：它只报告问题、不会
 像 `e2fsck -fp` 那样修复，建议保留构建后的镜像副本。构建宿主需要 `btrfs-progs`。
 
